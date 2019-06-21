@@ -1,0 +1,16 @@
+version: "2"
+ratings:
+  paths:
+  - "**.js"
+exclude_paths:
+- node_modules/
+plugins:
+  structure:
+    enabled: false
+  duplication:
+    enabled: false
+  eslint:
+    enable: true
+  nodesecurity:
+    enable: true
+    

@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "helmchart.fullname" . }}
+  labels:
+    app: {{ .Values.appLabel }}
+    version: "v{{ .Values.image.version }}"
+    app.kubernetes.io/name: {{ include "helmchart.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - name: {{ .Values.service.name }}
+      targetPort: {{ .Values.service.targetPort }}
+      port: {{ .Values.service.port }}
+  selector:
+    app: {{ .Values.appLabel }}
+    version: "v{{ .Values.image.version }}"
+    app.kubernetes.io/name: {{ include "helmchart.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}

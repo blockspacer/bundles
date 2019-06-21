@@ -1,0 +1,8 @@
+export MONGODBHOSTNAME=$(cat /secrets/secrets/SCHE-ORMG-ORDER-MONGODBHOSTNAME)
+export MONGODBKEY=$(cat /secrets/secrets/SCHE-ORMG-ORDER-MONGODBKEY)
+export MONGODBPOOLSIZE=$(cat /secrets/secrets/SCHE-ORMG-ORDER-MONGODBPOOLSIZE)
+export MONGODBSCHEMA=$(cat /secrets/secrets/SCHE-ORMG-ORDER-MONGODBSCHEMA)
+export PROMETHEUS=$(cat /secrets/secrets/SCHE-ORMG-ORDER-PROMETHEUS)
+export REDISCACHEKEY=$(cat /secrets/secrets/REDISCACHEKEY)
+export REDISCACHEHOSTNAME=$(cat /secrets/secrets/REDISCACHEHOSTNAME)
+export REDISPORT=$(cat /secrets/secrets/REDISPORT)

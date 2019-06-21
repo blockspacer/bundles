@@ -1,0 +1,531 @@
+# Variables de entorno locales
+variables:
+  # CI_DEBUG_TRACE: "true"
+  BUILD_IMAGE: node:10-alpine
+  # DISABLE_BUILD: "true"
+  # DISABLE_TEST: "true"
+  # DISABLE_PACKAGE: "true"
+  # DISABLE_VALIDATE: "true"
+  # DISABLE_DEPLOY: "true"
+  # DISABLE_TESTING: "true"
+  # DISABLE_MERGE: "true"
+  DOCK_REG_GRP: "rtl/sche/odmg/corp/corp/ccc/rsc"
+
+
+# Definir los stages del Pipeline
+stages:
+  - build
+  - test
+  - package
+  - release
+  - validate
+  - deploy
+  - testing
+  - rollback
+  - merge
+  - trigger
+
+# Cache para todos los jobs
+cache:
+  paths:
+    - node_modules/
+
+# template de 'job_test_ci'
+.job_template: &job_test_ci
+  stage: test
+  allow_failure: true
+  before_script:
+    - yarn
+  # tags:
+  #   - docker
+  only:
+    refs:
+      - branches
+  except:
+    refs:
+      - master
+    variables:
+      - $DISABLE_TEST == "true"
+      # - $CI_COMMIT_MESSAGE =~ /Merge branch/
+
+# template de 'job_testing_cd'
+.job_template: &job_testing_cd
+  stage: testing
+  allow_failure: true
+  # tags:
+  #   - docker
+  only:
+    refs:
+      - branches
+  except:
+    refs:
+      - develop
+      - /features?\/.*/
+      - /hotfix\/.*/
+    variables:
+      - $DISABLE_TESTING == "true"
+      # - $CI_COMMIT_MESSAGE =~ /Merge branch/
+
+# template de 'job_k8s_cd'
+.job_template: &job_k8s_cd
+  image: clmdevops/k8stools:1.0.0
+  before_script:
+    - |
+      if [ $CI_COMMIT_REF_SLUG == "master" ]
+      then
+        export KUBE_CA_PEM=$KUBE_CA_PEM_PRD
+        export KUBE_NAME=$KUBE_NAME_PRD
+        export KUBE_URL=$KUBE_URL_PRD
+        export KUBE_NAMESPACE=$KUBE_NAMESPACE_PRD
+        export KUBE_TOKEN=$KUBE_TOKEN_PRD
+        export RELEASE_NAME=$(echo ${CI_PROJECT_NAME:0:17}-prd)
+
+      elif [[ $(echo "$CI_COMMIT_REF_SLUG" | grep -E ^develop) ]]
+      then
+        export KUBE_CA_PEM=$KUBE_CA_PEM_QA
+        export KUBE_NAME=$KUBE_NAME_QA
+        export KUBE_URL=$KUBE_URL_QA
+        export KUBE_NAMESPACE=$KUBE_NAMESPACE_DEV
+        export KUBE_TOKEN=$KUBE_TOKEN_QA
+        export RELEASE_NAME=$(echo ${CI_PROJECT_NAME:0:17}-dev)
+
+      elif [[ $(echo "$CI_COMMIT_REF_SLUG" | grep -E ^release.*) ]]
+      then
+        export KUBE_CA_PEM=$KUBE_CA_PEM_QA
+        export KUBE_NAME=$KUBE_NAME_QA
+        export KUBE_URL=$KUBE_URL_QA
+        export KUBE_NAMESPACE=$KUBE_NAMESPACE_QA
+        export KUBE_TOKEN=$KUBE_TOKEN_QA
+        export RELEASE_NAME=$(echo ${CI_PROJECT_NAME:0:17}-test)
+
+      elif [[ $(echo "$CI_COMMIT_REF_SLUG" | grep -E ^staging.*) ]]
+      then
+        export KUBE_CA_PEM=$KUBE_CA_PEM_QA
+        export KUBE_NAME=$KUBE_NAME_QA
+        export KUBE_URL=$KUBE_URL_QA
+        export KUBE_NAMESPACE=$KUBE_NAMESPACE_UAT
+        export KUBE_TOKEN=$KUBE_TOKEN_QA
+        export RELEASE_NAME=$(echo ${CI_PROJECT_NAME:0:17}-uat)
+      fi
+    - echo "${KUBE_CA_PEM}" > kube_ca.pem
+    - kubectl config set-cluster ${KUBE_NAME} --server=${KUBE_URL} --certificate-authority="$(pwd)/kube_ca.pem"
+    - kubectl config set-credentials clusterUser_${KUBE_NAME} --token=${KUBE_TOKEN}
+    - kubectl config set-context ${KUBE_NAME} --cluster=${KUBE_NAME} --user=clusterUser_${KUBE_NAME} --namespace ${KUBE_NAMESPACE}
+    - kubectl config use-context ${KUBE_NAME}
+    - kubectl cluster-info
+
+# template de 'job_validate_cd'
+.job_template: &job_validate_cd
+  stage: validate
+  # tags:
+  #   - docker
+  only:
+    refs:
+      - branches
+  except:
+    refs:
+      - /features?\/.*/
+      - /hotfix\/.*/
+    variables:
+      - $DISABLE_VALIDATE == "true"
+      # - $CI_COMMIT_MESSAGE =~ /Merge branch/
+
+# Template de 'job_deploy_cd'
+.job_template: &job_deploy_cd
+  stage: deploy
+  image: clmdevops/k8stools:1.0.0
+  before_script:
+    - echo "Obteniendo la version de la app"
+    - export PACKAGE_VERSION=$(grep 'version' package.json | cut -f2 -d":" | cut -f2 -d\")
+    - export MAYOR_VERSION=$(echo $PACKAGE_VERSION | cut -f1 -d".")
+    - echo $PACKAGE_VERSION
+    - echo "Setear el nombre del Release"
+    - export RELEASE_NAME=$(echo ${CI_PROJECT_NAME:0:17}-${CI_ENVIRONMENT_NAME##*-})
+    - if [[ $FORCE_UPGRADE == "true" ]]; then export FORCE="--force"; else export FORCE=""; fi
+  script:
+    - echo "${KUBE_CA_PEM}" > kube_ca.pem
+    - kubectl config set-cluster ${KUBE_NAME} --server=${KUBE_URL} --certificate-authority="$(pwd)/kube_ca.pem"
+    - kubectl config set-credentials clusterUser_${KUBE_NAME} --token=${KUBE_TOKEN}
+    - kubectl config set-context ${KUBE_NAME} --cluster=${KUBE_NAME} --user=clusterUser_${KUBE_NAME} --namespace ${KUBE_NAMESPACE}
+    - kubectl config use-context ${KUBE_NAME}
+    - cd k8s
+    - kubectl cluster-info
+    # Crear el namespace si no existe
+    - kubectl create namespace ${KUBE_NAMESPACE} || true
+    # Activar la inyeccion automatica del sidecar de istio
+    - kubectl label namespace ${KUBE_NAMESPACE} istio-injection=enabled || true
+    # Desplegar la app
+    - helm upgrade ${RELEASE_NAME} ./helmchart --install --wait ${FORCE}
+        --namespace ${KUBE_NAMESPACE}
+        --set replicaCount=${CI_APP_REPLICAS}
+        --set maxReplicaCount=${CI_APP_MAX_REPLICAS}
+        --set appLabel=${RELEASE_NAME}
+        --set fullnameOverride=${RELEASE_NAME}
+        --set ciEnvironment=${CI_COMMIT_REF_NAME}
+        --set image.repository=${DOCK_REG}/${DOCK_REG_GRP}/${CI_PROJECT_NAME}
+        --set image.tag=${PACKAGE_VERSION}
+        --set image.version=${MAYOR_VERSION}
+        --set secret.name=${RELEASE_NAME}
+        --set secret.registry=${DOCK_REG}
+        --set secret.username=${DOCK_REG_USER}
+        --set secret.password=${DOCK_REG_PASSWORD}
+        --set secret.email=${GITLAB_USER_EMAIL}
+        --set getsecrets.tenantId=${AZ_TENANT_ID}
+        --set getsecrets.client=${AZ_APP_ID}
+        --set getsecrets.key=${AZ_APP_PWD}
+        --set getsecrets.vaultBaseUrl=${AZ_KEYVAULT_URL}
+        --set getsecrets.secretKeys=${CI_SECRET_KEYS}
+        --set enviroments.ADDRESS=${ADDRESS}
+        --set enviroments.NODE_ENV=${NODE_ENV}
+        --set service.port=${NODE_PORT}
+        --set service.targetPort=${NODE_PORT}
+        --set istio.virtualservice.service=${CI_PROJECT_NAME}
+        --set istio.virtualservice.prefix="${ISTIO_PREFIX}/api/v${MAYOR_VERSION}/${API_NAME}/${CI_PROJECT_NAME}"
+        --set istio.virtualservice.rewrite.uri="/api/v${MAYOR_VERSION}/${API_NAME}/${CI_PROJECT_NAME}"
+        --set istio.virtualservice.host=${CI_APP_HOST}
+        --set istio.virtualservice.domain=${CI_APP_DOMAIN}
+  # tags:
+  #   - docker
+  except:
+    refs:
+      - /features?\/.*/
+      - /hotfix\/.*/
+    variables:
+      - $DISABLE_DEPLOY == "true"
+      # - $CI_COMMIT_MESSAGE =~ /Merge branch/
+
+# JOB para compilar la app
+build:
+  image: "${BUILD_IMAGE}"
+  stage: build
+  variables:
+    NODE_ENV: 'development'
+  script:
+    - yarn
+  only:
+    refs:
+      - branches
+  except:
+    refs:
+      - master
+    variables:
+      - $DISABLE_BUILD == "true"
+      # - $CI_COMMIT_MESSAGE =~ /Merge branch/
+  # tags:
+  #   - docker
+  cache:
+    paths:
+      - node_modules/
+
+# JOB para revision de calidad del codigo
+code_quality:
+  <<: *job_test_ci
+  variables:
+    CODECLIMATE_CODE: $CI_PROJECT_DIR
+    DOCKER_DRIVER: overlay2
+  image: docker:stable
+  services:
+    - docker:stable-dind
+  before_script:
+    - echo "Ejecutando codeclimate"
+  script:
+    - export SP_VERSION=$(echo "$CI_SERVER_VERSION"
+        | sed 's/^\([0-9]*\)\.\([0-9]*\).*/\1-\2-stable/')
+    - export REGISTRY="registry.gitlab.com/gitlab-org"
+    - docker run
+        --env SOURCE_CODE="$PWD"
+        --volume "$PWD":/code
+        --volume /var/run/docker.sock:/var/run/docker.sock
+        "${REGISTRY}/security-products/codequality:$SP_VERSION" /code
+    - echo gl-code-quality-report.json
+  artifacts:
+    reports:
+      codequality: gl-code-quality-report.json
+  cache:
+    paths:
+      - node_modules/
+    policy: pull
+
+# JOB para revision de seguridad del codigo
+sast:
+  <<: *job_test_ci
+  # stage: test
+  image: docker:stable
+  variables:
+    SAST_CONFIDENCE_LEVEL: 2
+    DOCKER_DRIVER: overlay2
+  # allow_failure: true
+  services:
+    - docker:stable-dind
+  before_script:
+    - echo "Ejecutando sast"
+  script:
+    - export SP_VERSION=$(echo "$CI_SERVER_VERSION"
+        | sed 's/^\([0-9]*\)\.\([0-9]*\).*/\1-\2-stable/')
+    - export REGISTRY="registry.gitlab.com/gitlab-org"
+    - docker run --env SAST_CONFIDENCE_LEVEL="${SAST_CONFIDENCE_LEVEL:-3}"
+        --volume "$PWD:/code"
+        --volume /var/run/docker.sock:/var/run/docker.sock
+        "${REGISTRY}/security-products/sast:$SP_VERSION" /app/bin/run /code
+    - echo gl-sast-report.json
+  artifacts:
+    reports:
+      sast: gl-sast-report.json
+  cache:
+    paths:
+      - node_modules/
+    policy: pull
+
+# JOB para pruebas unitarias del codigo
+unit_test:
+  <<: *job_test_ci
+  image: "${BUILD_IMAGE}"
+  script:
+    - yarn test:unit
+  cache:
+    paths:
+      - node_modules/
+    policy: pull
+
+#JOB para test lint revision de codigo
+lint_test:
+  <<: *job_test_ci
+  image: "${BUILD_IMAGE}"
+  script:
+    - yarn lint:test
+  cache:
+    paths:
+      - node_modules/
+    policy: pull
+
+# JOB para escaneo de cobertura de codigo
+coverage_test:
+  <<: *job_test_ci
+  image: "${BUILD_IMAGE}"
+  script:
+    - yarn test:coverage:unit
+  cache:
+    paths:
+      - node_modules/
+    policy: pull
+  artifacts:
+    paths:
+      - coverage/
+
+# JOB para escaneo de dependencias del codigo
+dependency_scanning:
+  <<: *job_test_ci
+  image: docker:stable
+  variables:
+    DOCKER_DRIVER: overlay2
+    DEP_SCAN_DISABLE_REMOTE_CHECKS: 'false'
+  services:
+    - docker:stable-dind
+  before_script:
+    - echo "Ejecutando dependency scanning"
+  script:
+    - export SP_VERSION=$(echo "$CI_SERVER_VERSION"
+        | sed 's/^\([0-9]*\)\.\([0-9]*\).*/\1-\2-stable/')
+    - export REGISTRY="registry.gitlab.com/gitlab-org"
+    - docker run
+        --env DEP_SCAN_DISABLE_REMOTE_CHECKS="${DEP_SCAN_DISABLE_REMOTE_CHECKS}"
+        --volume "$PWD:/code"
+        --volume /var/run/docker.sock:/var/run/docker.sock
+        "${REGISTRY}/security-products/dependency-scanning:$SP_VERSION" /code
+  artifacts:
+    reports:
+      dependency_scanning: gl-dependency-scanning-report.json
+  cache:
+    paths:
+      - node_modules/
+    policy: pull
+
+# JOB para empaquetar y publicar la app
+package_publish:
+  image: docker:stable
+  stage: package
+  variables:
+    DOCKER_DRIVER: overlay2
+  services:
+    - docker:stable-dind
+  before_script:
+    - export PACKAGE_VERSION=$(grep 'version' package.json | cut -f2 -d":" | cut -f2 -d\")
+    - echo $PACKAGE_VERSION
+    # Login en docker registry
+    - echo "Construyendo la imagen DOCKER de la APP"
+    - docker login
+        -u ${DOCK_REG_USER}
+        -p ${DOCK_REG_PASSWORD}
+        ${DOCK_REG}
+  script:
+    - echo 'Crear tag de imagen docker latest'
+    - docker build -t ${DOCK_REG}/${DOCK_REG_GRP}/${CI_PROJECT_NAME}:${PACKAGE_VERSION} --build-arg DEBUG=1 .
+    - docker push ${DOCK_REG}/${DOCK_REG_GRP}/${CI_PROJECT_NAME}:${PACKAGE_VERSION}
+  # tags:
+  #   - docker
+  only:
+    refs:
+      - branches
+  except:
+    refs:
+      - master
+      - /features?\/.*/
+    variables:
+      - $DISABLE_PACKAGE == "true"
+      # - $CI_COMMIT_MESSAGE =~ /Merge branch/
+  cache:
+    paths:
+      - node_modules/
+    policy: pull
+
+# JOB para escanear el contenedor de la app
+container_scanning:
+  <<: *job_validate_cd
+  image: docker:stable
+  services:
+    - docker:stable-dind
+  variables:
+    DOCKER_DRIVER: overlay2
+  before_script:
+    - echo "Obteniendo la version de la app"
+    - export PACKAGE_VERSION=$(grep 'version' package.json | cut -f2 -d":" | cut -f2 -d\")
+    - echo $PACKAGE_VERSION
+    # Login en docker registry
+    - echo "Construyendo la imagen DOCKER de la APP"
+    - docker login
+        -u ${DOCK_REG_USER}
+        -p ${DOCK_REG_PASSWORD}
+        ${DOCK_REG}
+  script:
+    - docker run -d --name db arminc/clair-db:latest
+    - docker run -p 6060:6060 --link db:postgres -d --name clair --restart on-failure arminc/clair-local-scan:v2.0.1
+    - apk add -U wget ca-certificates
+    - docker pull ${DOCK_REG}/${DOCK_REG_GRP}/${CI_PROJECT_NAME}:${PACKAGE_VERSION}
+    - wget https://github.com/arminc/clair-scanner/releases/download/v8/clair-scanner_linux_amd64
+    - mv clair-scanner_linux_amd64 clair-scanner
+    - chmod +x clair-scanner
+    - touch clair-whitelist.yml
+    - while( ! wget -q -O /dev/null http://docker:6060/v1/namespaces ) ; do sleep 1 ; done
+    - retries=0
+    - echo "Esperando al inicio del proceso de Clair"
+    - while( ! wget -T 10 -q -O /dev/null http://docker:6060/v1/namespaces ) ; do sleep 1 ; echo -n "." ; if [ $retries -eq 10 ] ; then echo " Timeout, abortando." ; exit 1 ; fi ; retries=$(($retries+1)) ; done
+    - ./clair-scanner -c http://docker:6060 --ip $(hostname -i) -r gl-container-scanning-report.json -l clair.log -w clair-whitelist.yml ${DOCK_REG}/${DOCK_REG_GRP}/${CI_PROJECT_NAME}:${PACKAGE_VERSION} || true
+  artifacts:
+    reports:
+      container_scanning: gl-container-scanning-report.json
+
+# JOB para desplegar la app en dev
+Deploy_dev:
+  <<: *job_deploy_cd
+  environment:
+    name: ${CI_PROJECT_NAME}-dev
+  variables:
+    NODE_PORT: '3000'
+    NODE_ENV: 'testing'
+    CI_APP_REPLICAS: "1"
+    CI_APP_MAX_REPLICAS: "2"
+    CI_APP_HOST: "*"
+    AZ_APP_ID: ${AZ_CCC_APP_ID_QA}
+    AZ_APP_PWD: ${AZ_CCC_APP_PWD_QA}
+    AZ_KEYVAULT_URL: ${AZ_CCC_KEYVAULT_URL_QA}
+    CI_SECRET_KEYS: ${SECRET_KEYS_QA}
+    KUBE_CA_PEM: ${KUBE_CA_PEM_QA}
+    KUBE_URL: ${KUBE_URL_QA}
+    KUBE_NAME: ${KUBE_NAME_QA}
+    KUBE_NAMESPACE: ${KUBE_NAMESPACE_DEV}
+    KUBE_TOKEN: ${KUBE_TOKEN_QA}
+    ISTIO_PREFIX: "/dev"
+  only:
+    refs:
+      - develop
+
+# JOB para desplegar la app en test
+Deploy_test:
+  <<: *job_deploy_cd
+  environment:
+    name: ${CI_PROJECT_NAME}-test
+  variables:
+    NODE_PORT: '3000'
+    NODE_ENV: 'testing'
+    CI_APP_REPLICAS: "1"
+    CI_APP_MAX_REPLICAS: "2"
+    CI_APP_HOST: "*"
+    AZ_APP_ID: ${AZ_CCC_APP_ID_QA}
+    AZ_APP_PWD: ${AZ_CCC_APP_PWD_QA}
+    AZ_KEYVAULT_URL: ${AZ_CCC_KEYVAULT_URL_QA}
+    CI_SECRET_KEYS: ${SECRET_KEYS_QA}
+    KUBE_CA_PEM: ${KUBE_CA_PEM_QA}
+    KUBE_URL: ${KUBE_URL_QA}
+    KUBE_NAME: ${KUBE_NAME_QA}
+    KUBE_NAMESPACE: ${KUBE_NAMESPACE_QA}
+    KUBE_TOKEN: ${KUBE_TOKEN_QA}
+    ISTIO_PREFIX: ""
+  only:
+    refs:
+      - /release?\/.*/
+
+# JOB para desplegar la app en uat
+Deploy_uat:
+  <<: *job_deploy_cd
+  environment:
+    name: ${CI_PROJECT_NAME}-uat
+  variables:
+    NODE_PORT: '3000'
+    NODE_ENV: 'testing'
+    CI_APP_REPLICAS: "1"
+    CI_APP_MAX_REPLICAS: "2"
+    CI_APP_HOST: "*"
+    AZ_APP_ID: ${AZ_CCC_APP_ID_QA}
+    AZ_APP_PWD: ${AZ_CCC_APP_PWD_QA}
+    AZ_KEYVAULT_URL: ${AZ_CCC_KEYVAULT_URL_QA}
+    CI_SECRET_KEYS: ${SECRET_KEYS_UAT}
+    KUBE_CA_PEM: ${KUBE_CA_PEM_QA}
+    KUBE_URL: ${KUBE_URL_QA}
+    KUBE_NAME: ${KUBE_NAME_QA}
+    KUBE_NAMESPACE: ${KUBE_NAMESPACE_UAT}
+    KUBE_TOKEN: ${KUBE_TOKEN_QA}
+    ISTIO_PREFIX: "/uat"
+  only:
+    refs:
+      - /staging?\/.*/
+
+#JOB para testing integracion de la app
+integration_testing:
+  <<: *job_k8s_cd
+  <<: *job_testing_cd
+  script:
+    - export POD_NAME=$(kubectl get pods --namespace ${KUBE_NAMESPACE} -l "app=$RELEASE_NAME" -o jsonpath="{.items[0].metadata.name}")
+    - echo "Realizando prueba de integracion en POD $POD_NAME"
+    - kubectl -n ${KUBE_NAMESPACE} exec $POD_NAME yarn test:integration
+
+#JOB para testing cobertura de la app
+coverage_testing:
+  <<: *job_k8s_cd
+  <<: *job_testing_cd
+  script:
+    - export POD_NAME=$(kubectl get pods --namespace ${KUBE_NAMESPACE} -l "app=$RELEASE_NAME" -o jsonpath="{.items[0].metadata.name}")
+    - echo "Realizando prueba de cobertura en POD $POD_NAME"
+    - kubectl -n ${KUBE_NAMESPACE} exec $POD_NAME yarn test:coverage
+
+#JOB para Rollback del despliegue
+Rollback:
+  <<: *job_k8s_cd
+  stage: rollback
+  when: on_failure
+  dependencies:
+    - Deploy_dev
+    - Deploy_test
+    - Deploy_uat
+  script:
+    - echo "Realizar el rollback de la app a la version anterior"
+    - helm history $RELEASE_NAME | grep DEPLOYED
+    - echo "Ejecutar comando de rollback con helm"
+    - helm rollback $RELEASE_NAME $(helm history $RELEASE_NAME | grep DEPLOYED | cut -f1)
+    - helm status $RELEASE_NAME
+  only:
+    refs:
+      - branches
+  except:
+    refs:
+      - /features?\/.*/
+      - /hotfix\/.*/

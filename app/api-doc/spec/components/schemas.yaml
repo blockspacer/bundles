@@ -1,0 +1,315 @@
+components:
+  schemas:
+    ResponseStatus:
+      type: string
+      enum: [success, fail, error]
+    ResponseCodeForFailure:
+      type: string
+      enum:
+      - UNKNOWN_ENDPOINT
+      - INVALID_REQUEST
+    ResponseCodeForError:
+      type: string
+      enum:
+      - UNKNOWN_ERROR
+      - INTERNAL_ERROR
+    GetSuccessResponse:
+      type: object
+      properties:
+        status:
+          $ref: '#/components/schemas/ResponseStatus'
+        data:
+            $ref: '#/components/schemas/LPN'                       
+        message:
+          type: string
+      required:
+      - status
+      - data
+      - message
+    GetAllSuccessResponse:
+      type: object
+      properties:
+        status:
+          $ref: '#/components/schemas/ResponseStatus'
+        data:
+            type: array
+            items:
+              $ref: '#/components/schemas/LPN' 
+        message:
+          type: string
+      required:
+      - status
+      - data
+      - message
+    PostSuccessResponse:
+      type: object
+      properties:
+        status:
+          $ref: '#/components/schemas/ResponseStatus'
+        data:
+          properties:
+            insertedId:
+              type: string
+        message:
+          type: string
+      required:
+      - status
+      - data
+      - message
+    DeleteSuccessResponse:
+      type: object
+      properties:
+        status:
+          $ref: '#/components/schemas/ResponseStatus'
+        message:
+          type: string
+      required:
+      - status
+      - data
+      - message
+    PutSuccessResponse:
+      type: object
+      properties:
+        status:
+          $ref: '#/components/schemas/ResponseStatus'
+        data:
+          $ref: '#/components/schemas/LPN' 
+      required:
+      - status
+      - data
+      - message
+    PatchSuccessResponse:
+      type: object
+      properties:
+        status:
+          $ref: '#/components/schemas/ResponseStatus'
+        message:
+          type: string
+      required:
+      - status
+      - data
+      - message
+    SuccessResponse:
+      type: object
+      properties:
+        status:
+          $ref: '#/components/schemas/ResponseStatus'
+        data:
+          type: object
+          nullable: true
+        message:
+          type: string
+      required:
+      - status
+      - data
+      - message
+    FailureResponse:
+      type: object
+      properties:
+        status:
+          $ref: '#/components/schemas/ResponseConsumer'
+        code:
+          $ref: '#/components/schemas/ResponseCodeForFailure'
+        data:
+          type: array
+          items:
+            type: object
+            properties:
+              param:
+                type: string
+              message:
+                type: string
+          nullable: true
+        message:
+          type: string
+      required:
+      - status
+      - code
+      - data
+      - message
+    ErrorResponse:
+      type: object
+      properties:
+        status:
+          $ref: '#/components/schemas/ResponseStatus'
+        data:
+          type: array
+          items:
+            type: object
+            properties:
+              param:
+                type: string
+              message:
+                type: string
+          nullable: true
+        message:
+          type: string
+      required:
+      - status
+      - data
+      - message
+    InternalErrorResponse:
+      properties:
+        status:
+          type: string
+          example: error
+        code: 
+          type: string
+        message:
+          type: string
+    ValidateErrorResponse: 
+      properties: 
+        status: 
+          type: string
+          example: fail
+        data: 
+          type: object
+          properties: 
+            isJoi: 
+              type: boolean
+            name: string
+            details:
+              items:
+                properties:
+                  type: object
+              type: array
+            _object:
+              items:
+                properties:
+                  type: object
+        message: 
+          type: string
+      required: 
+        - status
+        - data
+        - message
+      type: object
+    DuplicateKeyErrorResponse: 
+      properties: 
+        status: 
+          type: string
+          example: fail
+        code: 
+          type: string
+          example: MongoError
+        message: 
+          type: string
+          example: E11000 duplicate key error.
+      required: 
+        - status
+        - code
+        - message
+      type: object
+    HealthySuccessResponse:
+      properties:
+        status:
+          type: string
+          example: success
+        data:
+          type: string
+          enum: [true, false]
+          example: true
+        message:
+          type: string
+          example: MongoDb Ok!
+    HealthyErrorResponse:
+      properties:
+        status:
+          type: string
+          example: error
+        message:
+          type: string
+          example: Internal Server Error
+    LPN:
+       type: object
+       properties:
+            orderId:
+                type: string
+                required: true
+                example: '62491047055'
+            lpn:
+                type: array
+                items:
+                  properties: 
+                      lpnId:
+                        type: string
+                        example: '666'
+                      lpnStatus:
+                        type: string
+                        example: 'Enrutado Bodega.'
+                      lpnStatusDate:
+                        type: string
+                        example: '2019-05-31'
+                      totalTraces:
+                        type: string
+                        example: '2'
+                      sku:
+                        type: string
+                        example: '1129074'
+                      skuDescription:
+                        type: string
+                        example: 'CALEFON 7LT GL MASTER SPLENDID'
+                      quantity:
+                        type: string
+                        example: '5'
+                      receptionDocumentType:
+                        type: string
+                        example: 'GDD'
+                      firstOriginFacilityId:
+                        type: string   
+                        example: '17'
+                      firstOriginFacilityName:
+                        type: string
+                        example: 'CD Sodimac'
+                      lastDestinationFacilityId:
+                        type: string
+                        example: '165'
+                      lastDdestinationFacilityName:
+                        type: string
+                        example: '(Electrohogar)  FALABELLA RETAIL S.A.'
+                      lpnTrace:
+                        type: array
+                        items:
+                          properties:
+                            traceStatus:
+                              type: string   
+                              example: 'Completado'
+                            site:
+                              type: string   
+                              example: 'TBD'
+                            plannedDate:
+                              type: string   
+                              example: '2019-05-31'
+                            receptionDate:
+                              type: string   
+                              example: '2019-05-31'
+                            user:
+                              type: string   
+                              example: 'TBD'
+                            carrier:
+                              type: string   
+                              example: 'TBD'
+                            licensePlate:
+                              type: string   
+                              example: 'TBD'
+                            originFacilityIdXD:
+                              type: string   
+                              example: '17'
+                            originFacilityNameXD:
+                              type: string   
+                              example: 'CD Sodimac'
+                            destinationFacilityIdXD:
+                              type: string   
+                              example: '1445'
+                            destinationFacilityNameXD:
+                              type: string   
+                              example: '(La Dehesa)  FALABELLA RETAIL S.A.'
+    PatchBodyRequest:
+        type: object
+        properties:
+                lpnsId:
+                  type: array
+                  items:
+                    properties:
+                    type: string
+                    example: 'lpn001'

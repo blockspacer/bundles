@@ -1,0 +1,105 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "helmchart.fullname" . }}
+  labels:
+    app: {{ .Values.appLabel }}
+    version: "v{{ .Values.image.version }}"
+    app.kubernetes.io/name: {{ include "helmchart.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ .Values.appLabel }}
+      version: "v{{ .Values.image.version }}"
+      app.kubernetes.io/name: {{ include "helmchart.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.appLabel }}
+        version: "v{{ .Values.image.version }}"
+        app.kubernetes.io/name: {{ include "helmchart.name" . }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      imagePullSecrets:
+        - name: {{ .Values.secret.name }}
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          env:
+          - name: CI_ENVIRONMENT_RUN
+            value: {{ .Values.ciEnvironment }}
+          - name: ADDRESS
+            value: {{ .Values.enviroments.ADDRESS }}
+          - name: NODE_PORT
+            value: "{{ .Values.service.targetPort }}"
+          - name: NODE_ENV
+            value: {{ .Values.enviroments.NODE_ENV }}
+          - name: API_VERSION
+            value: "v{{ .Values.image.version }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.service.targetPort }}
+          volumeMounts:
+          - name: secrets
+            mountPath: /secrets
+            readOnly: true
+          livenessProbe:
+            httpGet:
+              path: "{{ .Values.istio.virtualservice.rewrite.uri }}/status/healthy"
+              port: {{ .Values.service.targetPort }}
+            initialDelaySeconds: 60
+            timeoutSeconds: 5
+            failureThreshold: 5
+          readinessProbe:
+            httpGet:
+              path: "{{ .Values.istio.virtualservice.rewrite.uri }}/status/healthy"
+              port: {{ .Values.service.targetPort }}
+            initialDelaySeconds: 60
+            timeoutSeconds: 5
+            failureThreshold: 5
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      initContainers:
+      - name: keyvault-agent
+        image: clmdevops/acs-keyvault-agent
+        env:
+        - name: TENANT_ID
+          value: {{ .Values.getsecrets.tenantId }}
+        - name: CLIENT
+          value: {{ .Values.getsecrets.client }}
+        - name: KEY
+          value: {{ .Values.getsecrets.key }}
+        - name: VAULT_BASE_URL
+          value: {{ .Values.getsecrets.vaultBaseUrl }}
+        - name: SECRETS_FOLDER
+          value: /secrets
+        - name: SECRETS_KEYS
+          value: {{ .Values.getsecrets.secretKeys }}
+        volumeMounts:
+        - name: secrets
+          mountPath: /secrets
+      volumes:
+      - name: secrets
+        emptyDir:
+          medium: Memory
+      restartPolicy: Always
+      {{- with .Values.hostAliases }}
+      hostAliases:
+        {{ toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

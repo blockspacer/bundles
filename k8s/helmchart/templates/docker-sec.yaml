@@ -1,0 +1,8 @@
+# This secret is used to set the initial credentials of the node container.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ .Values.secret.name }}
+type: kubernetes.io/dockercfg
+data:
+  .dockercfg: {{ template "imagePullSecret" . }}
